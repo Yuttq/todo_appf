@@ -11,7 +11,6 @@ class TodoApp {
             logoutBtn: document.getElementById('logoutBtn'),
             taskCount: document.getElementById('task-count')
         };
-
         this.currentFilter = 'all';
         this.init();
     }
@@ -27,7 +26,6 @@ class TodoApp {
         this.elements.taskInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') this.addTask();
         });
-        
         this.elements.clearTasksBtn.addEventListener('click', () => this.clearCompletedTasks());
         this.elements.logoutBtn.addEventListener('click', () => this.logout());
         
@@ -40,37 +38,51 @@ class TodoApp {
         });
     }
 
-    async addTask() {
+    async handleApiRequest(endpoint, method, data) {
         try {
-            const response = await fetch('backend/todos/create.php', {
-                method: 'POST',
+            const response = await fetch(`${this.baseUrl}/${endpoint}`, {
+                method,
                 headers: { 
                     'Content-Type': 'application/json',
                     'Accept': 'application/json'
                 },
-                body: JSON.stringify(/* your data */),
+                body: JSON.stringify(data),
                 credentials: 'include'
             });
-    
-            // Check for JSON response
-            const contentType = response.headers.get('content-type');
-            if (!contentType || !contentType.includes('application/json')) {
-                const errorText = await response.text();
-                throw new Error(`Server returned: ${errorText}`);
-            }
-    
-            const data = await response.json();
-            
+
             if (!response.ok) {
-                throw new Error(data.error || 'Request failed');
+                const error = await response.json();
+                throw new Error(error.error || 'Request failed');
             }
-            
-            // Success handling
+            return await response.json();
         } catch (error) {
-            console.error('Full error:', error);
-            alert(`Operation failed: ${error.message}`);
+            console.error(`API Error (${endpoint}):`, error);
+            throw error;
         }
     }
+
+    async addTask() {
+        const taskText = this.elements.taskInput.value.trim();
+        if (!taskText) {
+            alert('Please enter a task');
+            return;
+        }
+
+        try {
+            const task = await this.handleApiRequest('create.php', 'POST', {
+                task: taskText,
+                due_date: this.elements.dueDateInput.value || null
+            });
+            
+            this.createTaskElement(task);
+            this.elements.taskInput.value = '';
+            this.elements.dueDateInput.value = '';
+            this.updateTaskCount();
+        } catch (error) {
+            alert(`Failed to add task: ${error.message}`);
+        }
+    }
+
     createTaskElement(task) {
         const li = document.createElement('li');
         li.dataset.id = task.id;
@@ -111,49 +123,22 @@ class TodoApp {
 
         this.elements.taskList.appendChild(li);
     }
-    async addTask() {
-        const taskText = this.elements.taskInput.value.trim();
-        const dueDate = this.elements.dueDateInput.value;
-    
-        if (!taskText) {
-            alert('Task cannot be empty');
-            return;
-        }
-    
+
+    async editTask(taskId, currentText, currentDueDate) {
+        const newText = prompt('Edit your task:', currentText);
+        if (newText === null || newText.trim() === "") return;
+
+        const newDueDate = prompt('Edit due date (YYYY-MM-DD):', currentDueDate || '');
+        
         try {
-            const response = await fetch('backend/todos/create.php', {
-                method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json' // Explicitly request JSON
-                },
-                body: JSON.stringify({
-                    task: taskText,
-                    due_date: dueDate || null
-                }),
-                credentials: 'include'
+            await this.handleApiRequest('update.php', 'POST', {
+                id: taskId,
+                task: newText.trim(),
+                due_date: newDueDate || null
             });
-    
-            // First check if response is JSON
-            const contentType = response.headers.get('content-type');
-            if (!contentType || !contentType.includes('application/json')) {
-                const text = await response.text();
-                throw new Error(`Invalid response: ${text}`);
-            }
-    
-            const data = await response.json();
-            
-            if (!response.ok) {
-                throw new Error(data.error || 'Failed to add task');
-            }
-    
-            this.createTaskElement(data);
-            this.elements.taskInput.value = "";
-            this.elements.dueDateInput.value = "";
-            this.updateTaskCount();
+            this.loadTasks();
         } catch (error) {
-            console.error('Full error:', error);
-            alert(`Error: ${error.message}\nCheck console for details`);
+            alert('Failed to update task');
         }
     }
 
@@ -161,20 +146,7 @@ class TodoApp {
         if (!confirm('Are you sure you want to delete this task?')) return;
 
         try {
-            const response = await fetch(`${this.baseUrl}/delete.php`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ id: taskId }),
-                credentials: 'include'
-            });
-
-            if (!response.ok) {
-                throw new Error('Failed to delete task');
-            }
-
-            const data = await response.json();
+            await this.handleApiRequest('delete.php', 'POST', { id: taskId });
             const li = document.querySelector(`li[data-id="${taskId}"]`);
             if (li) {
                 li.classList.add('fade-out');
@@ -184,7 +156,6 @@ class TodoApp {
                 }, 400);
             }
         } catch (error) {
-            console.error('Error:', error);
             alert('Failed to delete task');
         }
     }
@@ -194,53 +165,29 @@ class TodoApp {
         if (!li) return;
 
         const isCompleted = li.classList.contains('completed');
+        const checkbox = li.querySelector('input[type="checkbox"]');
         
         try {
-            const response = await fetch(`${this.baseUrl}/update.php`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    id: taskId,
-                    task: li.querySelector('span').textContent,
-                    is_completed: !isCompleted
-                }),
-                credentials: 'include'
+            await this.handleApiRequest('update.php', 'POST', {
+                id: taskId,
+                task: li.querySelector('span').textContent,
+                is_completed: !isCompleted
             });
-
-            if (!response.ok) {
-                throw new Error('Failed to update task');
-            }
-
             li.classList.toggle('completed');
             this.updateTaskCount();
         } catch (error) {
             console.error('Error:', error);
-            // Revert the checkbox if the request fails
-            const checkbox = li.querySelector('input[type="checkbox"]');
-            if (checkbox) {
-                checkbox.checked = isCompleted;
-            }
+            if (checkbox) checkbox.checked = isCompleted; // Revert on error
         }
     }
 
     async loadTasks() {
         try {
-            const response = await fetch(`${this.baseUrl}/read.php?filter=${this.currentFilter}`, {
-                credentials: 'include'
-            });
-
-            if (!response.ok) {
-                throw new Error('Failed to load tasks');
-            }
-
-            const tasks = await response.json();
+            const tasks = await this.handleApiRequest(`read.php?filter=${this.currentFilter}`, 'GET', null);
             this.elements.taskList.innerHTML = '';
             tasks.forEach(task => this.createTaskElement(task));
             this.updateTaskCount();
         } catch (error) {
-            console.error('Error:', error);
             alert('Failed to load tasks');
         }
     }
@@ -249,32 +196,12 @@ class TodoApp {
         if (!confirm('Are you sure you want to clear all completed tasks?')) return;
 
         try {
-            // First get all completed tasks
-            const response = await fetch(`${this.baseUrl}/read.php?filter=completed`, {
-                credentials: 'include'
-            });
-
-            if (!response.ok) {
-                throw new Error('Failed to fetch completed tasks');
-            }
-
-            const completedTasks = await response.json();
-            
-            // Delete each completed task
+            const completedTasks = await this.handleApiRequest('read.php?filter=completed', 'GET', null);
             for (const task of completedTasks) {
-                await fetch(`${this.baseUrl}/delete.php`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ id: task.id }),
-                    credentials: 'include'
-                });
+                await this.handleApiRequest('delete.php', 'POST', { id: task.id });
             }
-
             this.loadTasks();
         } catch (error) {
-            console.error('Error:', error);
             alert('Failed to clear completed tasks');
         }
     }
@@ -283,18 +210,10 @@ class TodoApp {
         const tasks = this.elements.taskList.querySelectorAll('li');
         tasks.forEach(task => {
             const isCompleted = task.classList.contains('completed');
-            
-            switch(filter) {
-                case 'all':
-                    task.style.display = '';
-                    break;
-                case 'completed':
-                    task.style.display = isCompleted ? '' : 'none';
-                    break;
-                case 'pending':
-                    task.style.display = !isCompleted ? '' : 'none';
-                    break;
-            }
+            task.style.display = 
+                filter === 'all' ? '' :
+                filter === 'completed' ? (isCompleted ? '' : 'none') :
+                (!isCompleted ? '' : 'none');
         });
     }
 
@@ -306,40 +225,22 @@ class TodoApp {
 
     async updateTaskCount() {
         try {
-            const allResponse = await fetch(`${this.baseUrl}/read.php?filter=all`, {
-                credentials: 'include'
-            });
-            const completedResponse = await fetch(`${this.baseUrl}/read.php?filter=completed`, {
-                credentials: 'include'
-            });
-
-            if (!allResponse.ok || !completedResponse.ok) {
-                throw new Error('Failed to fetch task counts');
-            }
-
-            const allTasks = await allResponse.json();
-            const completedTasks = await completedResponse.json();
-
+            const [allTasks, completedTasks] = await Promise.all([
+                this.handleApiRequest('read.php?filter=all', 'GET', null),
+                this.handleApiRequest('read.php?filter=completed', 'GET', null)
+            ]);
             this.elements.taskCount.textContent = 
                 `${completedTasks.length} of ${allTasks.length} tasks completed`;
         } catch (error) {
-            console.error('Error:', error);
+            console.error('Failed to update task count:', error);
         }
     }
 
     async logout() {
         try {
-            const response = await fetch('backend/auth/logout.php', {
-                credentials: 'include'
-            });
-
-            if (!response.ok) {
-                throw new Error('Logout failed');
-            }
-
+            await this.handleApiRequest('../auth/logout.php', 'POST', null);
             window.location.href = 'login.php';
         } catch (error) {
-            console.error('Error:', error);
             alert('Failed to logout');
         }
     }

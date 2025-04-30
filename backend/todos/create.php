@@ -1,48 +1,39 @@
-
-
 <?php
-
-// Enable error reporting
+// backend/todos/create.php
+declare(strict_types=1);
 error_reporting(E_ALL);
-ini_set('display_errors', 1);
+ini_set('display_errors', '0'); // Don't output errors to response
 
-// Absolute path resolution
-require __DIR__ . '/../../backend/auth/session.php';  // Adjusted path
-require __DIR__ . '/../../backend/config/db.php';
+// Absolute paths - adjust based on your actual structure
+require __DIR__ . '/../auth/session.php';
+require __DIR__ . '/../config/db.php';
 
-// Error handling before any output
-set_error_handler(function($severity, $message, $file, $line) {
-    throw new ErrorException($message, 0, $severity, $file, $line);
-});
-
+// Headers must come before any output
 header('Content-Type: application/json');
+header("Access-Control-Allow-Origin: http://localhost");
+header("Access-Control-Allow-Credentials: true");
 
 try {
-    // Rest of your create.php code...
-    // Get and validate input
-    $input = file_get_contents('php://input');
-    if (!$input) {
-        throw new Exception('No data received');
+    $json = file_get_contents('php://input');
+    if (!$json) throw new Exception('No input received');
+    
+    $data = json_decode($json, true);
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        throw new Exception('Invalid JSON: ' . json_last_error_msg());
     }
 
-    $data = json_decode($input, true);
-    if (!$data || !isset($data['task'])) {
-        throw new Exception('Invalid task data');
+    if (!isset($data['task']) || empty(trim($data['task']))) {
+        throw new Exception('Task is required');
     }
 
-    // Insert task
     $stmt = $conn->prepare("INSERT INTO todos (user_id, task, due_date) VALUES (?, ?, ?)");
-    $success = $stmt->execute([
+    $stmt->execute([
         $_SESSION['user_id'],
         trim($data['task']),
         $data['due_date'] ?? null
     ]);
 
-    if (!$success) {
-        throw new Exception('Database insert failed');
-    }
-
-    // Return the new task
+    // Return the created task
     $taskId = $conn->lastInsertId();
     $stmt = $conn->prepare("SELECT * FROM todos WHERE id = ?");
     $stmt->execute([$taskId]);
@@ -53,16 +44,8 @@ try {
 } catch (Exception $e) {
     http_response_code(500);
     echo json_encode([
-        'error' => 'Failed to add task',
+        'error' => 'Failed to create task',
         'message' => $e->getMessage()
     ]);
+    exit();
 }
-} catch (Exception $e) {
-    http_response_code(500);
-    die(json_encode([
-        'error' => 'Server error',
-        'message' => $e->getMessage()
-    ]));
-}
-
-
